@@ -1,0 +1,50 @@
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore folders
+        run: |
+          for f in *__*; do
+            new=$(echo "$f" | sed 's#__#/#g')
+            mkdir -p "$(dirname "$new")"
+            mv "$f" "$new"
+          done
+          find . -path ./.git -prune -o -type f -print | sort
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Android NDK r27c
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME" -name sdkmanager -path '*cmdline-tools*' | sort | tail -n1)"
+          echo "using sdkmanager at: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Compile root injector (arm64)
+        run: |
+          mkdir -p app/src/main/assets
+          CLANG="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+          "$CLANG" -O2 -Wall -Wextra -o app/src/main/assets/injector native/injector.c
+          file app/src/main/assets/injector
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.7
+
+      - run: gradle :app:assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AeroMenu-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
